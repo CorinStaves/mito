@@ -39,6 +39,7 @@ public class HbsHbrHboDistribution extends RandomizableConcurrentFunction<Void> 
     private final Map<Integer, MitoZone> zonesCopy;
 
     private final double[] destinationProbabilities;
+    private final double[] zoneAttractions;
 
     private double idealBudgetSum = 0;
     private double actualBudgetSum = 0;

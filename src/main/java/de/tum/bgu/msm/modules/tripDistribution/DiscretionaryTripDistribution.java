@@ -1,22 +1,24 @@
 package de.tum.bgu.msm.modules.tripDistribution;
 
 import com.google.common.collect.Iterables;
-import de.tum.bgu.msm.data.DataSet;
-import de.tum.bgu.msm.data.MitoHousehold;
-import de.tum.bgu.msm.data.Purpose;
+import de.tum.bgu.msm.data.*;
+import de.tum.bgu.msm.data.travelDistances.TravelDistances;
+import de.tum.bgu.msm.io.input.readers.CoefficientReader;
+import de.tum.bgu.msm.io.output.WriteZoneLogsums;
 import de.tum.bgu.msm.modules.Module;
-import de.tum.bgu.msm.modules.tripDistribution.destinationChooser.AirportDistribution;
 import de.tum.bgu.msm.modules.tripDistribution.destinationChooser.HbsHbrHboDistribution;
 import de.tum.bgu.msm.modules.tripDistribution.destinationChooser.NhbwNhboDistribution;
 import de.tum.bgu.msm.modules.tripDistribution.destinationChooser.RrtDistribution;
 import de.tum.bgu.msm.util.concurrent.ConcurrentExecutor;
 import de.tum.bgu.msm.util.matrices.IndexedDoubleMatrix2D;
+import org.apache.commons.lang3.tuple.Triple;
 import org.apache.log4j.Logger;
 import org.matsim.core.utils.collections.Tuple;
 
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static de.tum.bgu.msm.data.Purpose.*;
 
@@ -42,11 +44,20 @@ public final class DiscretionaryTripDistribution extends Module {
 
     @Override
     public void run() {
-        logger.info("Building initial destination choice utility matrices...");
-        buildMatrices();
+        logger.info("Loading mode choice model coefficients and zone attractions");
+        loadModeChoiceAndZoneAttractions();
 
-        logger.info("Distributing trips for households...");
-        distributeTrips();
+        logger.info("Preparing travel distance matrix");
+        prepareTravelDistanceMatrix();
+
+//        logger.info("Building initial destination choice utility matrices...");
+//        buildMatrices();
+
+        logger.info("Calculating logsum matrices");
+        calculateLogsumMatrices();
+
+//        logger.info("Distributing trips for households...");
+//        distributeTrips();
     }
 
     private void buildMatrices() {
@@ -63,6 +74,32 @@ public final class DiscretionaryTripDistribution extends Module {
             utilityMatrices.put(result.getFirst(), result.getSecond());
         }
         utilityMatrices.putAll(dataSet.getMandatoryUtilityMatrices());
+    }
+
+    private void calculateLogsumMatrices() {
+        final int numberOfThreads = Runtime.getRuntime().availableProcessors();
+        ConcurrentExecutor<Triple<Purpose, ModeRestriction, IndexedDoubleMatrix2D>> executor = ConcurrentExecutor.fixedPoolService(numberOfThreads);
+        List<Callable<Triple<Purpose, ModeRestriction, IndexedDoubleMatrix2D>>> logsumTasks = new ArrayList<>();
+
+        Collection<MitoPerson> persons = dataSet.getModelledPersons().values();
+
+        for (Purpose purpose : HB_DISCRETIONARY_PURPOSES) {
+            for (ModeRestriction modeRestriction : ModeRestriction.values()) {
+                Collection<MitoPerson> includedPersons = persons.stream()
+                        .filter(person -> person.hasTripsForPurpose(purpose))
+                        .filter(person -> person.getModeRestriction().equals(modeRestriction))
+                        .collect(Collectors.toUnmodifiableList());
+
+                logsumTasks.add(new zoneLogsumAverages(purpose, modeRestriction, includedPersons, zones, travelDistancesNMT,
+                        allZoneAttractions.get(purpose), allCoefficients.get(purpose), allDistanceCoefficients.get(purpose),
+                        allNests.get(purpose), 1.));
+            }
+        }
+        List<Triple<Purpose, ModeRestriction, IndexedDoubleMatrix2D>> results = executor.submitTasksAndWaitForCompletion(logsumTasks);
+//        WriteZoneLogsums.writeAllLogsumData(zones, results);
+        for(Triple<Purpose, ModeRestriction, IndexedDoubleMatrix2D> result : results) {
+            WriteZoneLogsums.writeLogsumData(zones, result);
+        }
     }
 
     private void distributeTrips() {

@@ -254,24 +254,24 @@ public final class TravelDemandGenerator2017 {
         logger.info("Running Module: Discretionary trip generation");
         discretionaryTripGeneration.run();
 
+        logger.info("Running Module: Mode Restriction");
+        modeRestriction.run();
+
         logger.info("Running Module: Discretionary Travel Time Budget");
         discretionaryTravelTimeBudget.run();
 
         logger.info("Running Module: Discretionary trip distribution");
         discretionaryTripDistribution.run();
 
-        logger.info("Running Module: Mode Restriction");
-        modeRestriction.run();
+//        SummarizeData.writeOutSyntheticPopulationWithTrips(dataSet);
+//        SummarizeData.writeOutTrips(dataSet, scenarioName);
+        System.exit(0);
 
         logger.info("Running Module: Trip to Mode Assignment (Mode Choice)");
         modeChoice.run();
 
         logger.info("Running time of day choice");
         timeOfDayChoice.run();
-
-        SummarizeData.writeOutSyntheticPopulationWithTrips(dataSet);
-        SummarizeData.writeOutTrips(dataSet, scenarioName);
-        System.exit(0);
 
         logger.info("Running trip scaling");
         tripScaling.run();

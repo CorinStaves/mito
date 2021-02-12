@@ -140,6 +140,16 @@ public class ModeRestrictionChoice extends Module {
             predictor += coefficients.get("hh.homePT");
         }
 
+        // Is work close to PT?
+        if(pp.getOccupation() != null) {
+            int occupationZoneId = pp.getOccupation().getZoneId();
+            double occupationDistanceToPT = dataSet.getZones().get(occupationZoneId).getDistanceToNearestRailStop();
+            double occupationWalkToPT = occupationDistanceToPT * (60 / 4.8);
+            if(occupationWalkToPT <= 20) {
+                predictor += coefficients.get("p.workPT_12");
+            }
+        }
+
         // Age
         int age = pp.getAge();
         if (age <= 18) {
@@ -168,7 +178,7 @@ public class ModeRestrictionChoice extends Module {
 
         // Has drivers Licence
         if(pp.hasDriversLicense()) {
-            predictor += coefficients.get("p.driversLicence");
+            predictor += coefficients.get("p.driversLicense");
         }
 
         // Has bicycle
@@ -176,52 +186,50 @@ public class ModeRestrictionChoice extends Module {
             predictor += coefficients.get("p.ownBicycle");
         }
 
-        // Trip distance mean, max, cv
-        List<MitoTrip> trips = pp.getTrips();
-        int tripCount = trips.size();
-        ArrayList<Double> tripDistances = new ArrayList<>();
-        double sum = 0;
-        double sumSquaredDiff = 0;
-        double maxTripDistance = Double.MIN_VALUE;
-        double minTripDistance = Double.MAX_VALUE;
-
-        for (MitoTrip trip : trips) {
-
-            Location origin = trip.getTripOrigin();
-            Location destination = trip.getTripDestination();
-
-            if(origin == null || destination == null) {
-                logger.error("Null trip destination tripID: " + trip.getId() + " personID: " + pp.getId());
-            }
-
-            double tripDistance = dataSet.getTravelDistancesNMT().
-                    getTravelDistance(origin.getZoneId(), destination.getZoneId());
-
-            maxTripDistance = Math.max(maxTripDistance, tripDistance);
-            minTripDistance = Math.min(minTripDistance, tripDistance);
-            tripDistances.add(tripDistance);
-            sum += tripDistance;
+        // Number of commute trips
+        List<MitoTrip> workTrips = pp.getTripsForPurpose(Purpose.HBW);
+        int workTripCount = workTrips.size();
+        if (workTripCount > 0 && workTripCount < 5) {
+            predictor += coefficients.get("p.workTrips_1234");
+        } else if (workTripCount >= 5) {
+            predictor += coefficients.get("p.workTrips_5");
         }
-        double mean = sum / tripCount;
-        for (Double s : tripDistances) {
-            sumSquaredDiff += Math.pow(s - mean , 2);
+
+        List<MitoTrip> educationTrips = pp.getTripsForPurpose(Purpose.HBE);
+        int educationTripCount = educationTrips.size();
+        if (educationTripCount > 0 && educationTripCount < 5) {
+            predictor += coefficients.get("p.eduTrips_1234");
+        } else if (educationTripCount >= 5) {
+            predictor += coefficients.get("p.eduTrips_5");
         }
-        double coefficientOfVariation = Math.sqrt(sumSquaredDiff / tripCount) / mean;
 
-        predictor += Math.log(minTripDistance) * coefficients.get("p.min_km_T");
-        predictor += Math.log(maxTripDistance) * coefficients.get("p.max_km_T");
-        predictor += coefficientOfVariation * coefficients.get("p.cv_km");
-
-        // Number of trips by purpose
-        predictor += Math.sqrt(pp.getTripsForPurpose(Purpose.HBW).size()) * coefficients.get("p.trips_HBW_T");
-        predictor += Math.sqrt(pp.getTripsForPurpose(Purpose.HBE).size()) * coefficients.get("p.trips_HBE_T");
+        // Number of discretionary trips
         predictor += Math.sqrt(pp.getTripsForPurpose(Purpose.HBS).size()) * coefficients.get("p.trips_HBS_T");
         predictor += Math.sqrt(pp.getTripsForPurpose(Purpose.HBR).size()) * coefficients.get("p.trips_HBR_T");
         predictor += Math.sqrt(pp.getTripsForPurpose(Purpose.HBO).size()) * coefficients.get("p.trips_HBO_T");
+        predictor += Math.sqrt(pp.getTripsForPurpose(Purpose.NHBW).size()) * coefficients.get("p.trips_NHBW_T");
         predictor += Math.sqrt(pp.getTripsForPurpose(Purpose.NHBO).size()) * coefficients.get("p.trips_NHBO_T");
         if(pp.hasTripsForPurpose(Purpose.RRT)) predictor += coefficients.get("p.isMobile_RRT");
 
+        // Mean commute trip distance
+        List<MitoTrip> commuteTrips = new ArrayList(workTrips);
+        commuteTrips.addAll(educationTrips);
+        int commuteTripCount = commuteTrips.size();
 
+        if (commuteTripCount > 0) {
+            ArrayList<Double> commuteTripDistances = new ArrayList<>();
+            double sum = 0;
+            for (MitoTrip trip : commuteTrips) {
+                double commuteDistance = dataSet.getTravelDistancesNMT().
+                        getTravelDistance(trip.getTripOrigin().getZoneId(),trip.getTripDestination().getZoneId());
+                commuteTripDistances.add(commuteDistance);
+                sum += commuteDistance;
+            }
+            double mean = sum / commuteTripCount;
+            double sqrtMean = Math.sqrt(mean);
+
+            predictor += sqrtMean * coefficients.get("p.m_km_mode_T");
+        }
 
         // Usual commute mode
         Mode dominantCommuteMode = pp.getDominantCommuteMode();
@@ -229,7 +237,7 @@ public class ModeRestrictionChoice extends Module {
             if (dominantCommuteMode.equals(Mode.autoDriver)) {
                 predictor += 0.;
             } else if (dominantCommuteMode.equals(Mode.autoPassenger)) {
-                predictor += 0.;
+                predictor += coefficients.get("p.usualCommuteMode_carP");
             } else if (dominantCommuteMode.equals(Mode.publicTransport)) {
                 predictor += coefficients.get("p.usualCommuteMode_PT");
             } else if (dominantCommuteMode.equals(Mode.bicycle)) {
